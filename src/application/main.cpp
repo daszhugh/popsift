@@ -178,7 +178,7 @@ static void collectFilenames( list<string>& inputFiles, const boost::filesystem:
     }
 }
 
-SiftJob* process_image( const string& inputFile, PopSift& PopSift )
+SiftJob* process_image( const string& inputFile, PopSift& popSift )
 {
     SiftJob* job;
     unsigned char* image_data;
@@ -200,8 +200,8 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
 
         if(!float_mode)
         {
-            // PopSift.init( w, h );
-            job = PopSift.enqueue(w, h, image_data);
+            // popSift.init( w, h );
+            job = popSift.enqueue(w, h, image_data);
 
             delete[] image_data;
         }
@@ -212,7 +212,7 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
             {
                 f_image_data[i] = float(image_data[i]) / 256.0f;
             }
-            job = PopSift.enqueue(w, h, f_image_data);
+            job = popSift.enqueue(w, h, f_image_data);
 
             delete[] image_data;
             delete[] f_image_data;
@@ -247,7 +247,7 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
 
         nvtxRangePop( ); // "load and convert image - devil"
 
-        job = PopSift.enqueue( w, h, image_data );
+        job = popSift.enqueue( w, h, image_data );
 
         img.Clear();
     }
@@ -266,8 +266,8 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
 
         if( ! float_mode )
         {
-            // PopSift.init( w, h );
-            job = PopSift.enqueue( w, h, image_data );
+            // popSift.init( w, h );
+            job = popSift.enqueue( w, h, image_data );
 
             delete [] image_data;
         }
@@ -278,7 +278,7 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
             {
                 f_image_data[i] = float( image_data[i] ) / 256.0f;
             }
-            job = PopSift.enqueue( w, h, f_image_data );
+            job = popSift.enqueue( w, h, f_image_data );
 
             delete [] image_data;
             delete [] f_image_data;
