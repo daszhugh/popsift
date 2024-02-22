@@ -98,7 +98,8 @@ endif()
 # popsift-match
 #############################################################
 
-add_executable(popsift-match match.cpp pgmread.cpp pgmread.h)
+add_executable(popsift-match match.cpp pgmread.cpp pgmread.h
+  timer.h timer.cpp string.h string.cpp path.h path.cpp)
 
 set_property(TARGET popsift-match PROPERTY CXX_STANDARD 11)
 
@@ -106,6 +107,12 @@ target_compile_options(popsift-match PRIVATE ${PD_COMPILE_OPTIONS} )
 target_include_directories(popsift-match PUBLIC ${PD_INCLUDE_DIRS})
 target_compile_definitions(popsift-match PRIVATE ${Boost_DEFINITIONS})
 target_link_libraries(popsift-match PUBLIC PopSift::popsift ${PD_LINK_LIBS})
+
+if(OpenCV_FOUND)
+  target_compile_options(popsift-match PRIVATE "-DUSE_OPENCV" )
+  target_include_directories(popsift-match PUBLIC ${OpenCV_INCLUDE_DIRS} )
+  target_link_libraries(popsift-match PUBLIC ${OpenCV_LIBS} )
+endif()
 
 #############################################################
 # installation

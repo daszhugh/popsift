@@ -25,6 +25,10 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef USE_OPENCV
+#include <opencv2/opencv.hpp>
+#endif
+
 #ifdef USE_DEVIL
 #include <devil_cpp_wrapper.hpp>
 #endif
@@ -37,7 +41,7 @@
 #define nvtxRangePop()
 #endif
 
-using namespace std;
+#include "timer.h"
 
 static bool print_dev_info  {false};
 static bool print_time_info {false};
@@ -45,7 +49,7 @@ static bool write_as_uchar  {false};
 static bool dont_write      {false};
 static bool pgmread_loading {false};
 
-static void parseargs(int argc, char** argv, popsift::Config& config, string& lFile, string& rFile) {
+static void parseargs(int argc, char** argv, popsift::Config& config, std::string& lFile, std::string& rFile) {
     using namespace boost::program_options;
 
     options_description options("Options");
@@ -146,9 +150,9 @@ static void parseargs(int argc, char** argv, popsift::Config& config, string& lF
 }
 
 
-static void collectFilenames( list<string>& inputFiles, const boost::filesystem::path& inputFile )
+static void collectFilenames(std::list<std::string>& inputFiles, const boost::filesystem::path& inputFile)
 {
-    vector<boost::filesystem::path> vec;
+    std::vector<boost::filesystem::path> vec;
     std::copy( boost::filesystem::directory_iterator( inputFile ),
                boost::filesystem::directory_iterator(),
                std::back_inserter(vec) );
@@ -166,27 +170,50 @@ static void collectFilenames( list<string>& inputFiles, const boost::filesystem:
     }
 }
 
-SiftJob* process_image( const string& inputFile, PopSift& PopSift )
+SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 {
     unsigned char* image_data;
     SiftJob* job;
 
     nvtxRangePushA( "load and convert image" );
-#ifdef USE_DEVIL
+#ifdef USE_OPENCV
+    if(1)
+    {
+        nvtxRangePushA("load and convert image - pgmread");
+        int w{};
+        int h{};
+
+        cv::Mat image = cv::imread(inputFile, cv::IMREAD_GRAYSCALE);
+        w = image.cols;
+        h = image.rows;
+        image_data = new unsigned char[w * h];
+        memcpy(image_data, image.data, w * h * sizeof(unsigned char));
+
+        nvtxRangePop(); // "load and convert image - pgmread"
+
+
+        // popSift.init( w, h );
+        job = popSift.enqueue(w, h, image_data);
+
+        delete[] image_data;
+
+    }
+    else
+#else defined USE_DEVIL
     if( ! pgmread_loading )
     {
         ilImage img;
         if( img.Load( inputFile.c_str() ) == false ) {
-            cerr << "Could not load image " << inputFile << endl;
+            std::cerr << "Could not load image " << inputFile << std::endl;
             return 0;
         }
         if( img.Convert( IL_LUMINANCE ) == false ) {
-            cerr << "Failed converting image " << inputFile << " to unsigned greyscale image" << endl;
+            std::cerr << "Failed converting image " << inputFile << " to unsigned greyscale image" << std::endl;
             exit( -1 );
         }
         const auto w = img.Width();
         const auto h = img.Height();
-        cout << "Loading " << w << " x " << h << " image " << inputFile << endl;
+        std::cout << "Loading " << w << " x " << h << " image " << inputFile << std::endl;
         image_data = img.GetData();
 
         nvtxRangePop( );
@@ -209,7 +236,7 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
         nvtxRangePop( );
 
         // PopSift.init( w, h );
-        job = PopSift.enqueue( w, h, image_data );
+        job = popSift.enqueue( w, h, image_data );
 
         delete [] image_data;
     }
@@ -222,8 +249,8 @@ int main(int argc, char **argv)
     cudaDeviceReset();
 
     popsift::Config config;
-    string         lFile{};
-    string         rFile{};
+    std::string         lFile{};
+    std::string         rFile{};
 
     std::cout << "PopSift version: " << POPSIFT_VERSION_STRING << std::endl;
 
@@ -238,41 +265,51 @@ int main(int argc, char **argv)
 
     if( boost::filesystem::exists( lFile ) ) {
         if( ! boost::filesystem::is_regular_file( lFile ) ) {
-            cout << "Input file " << lFile << " is not a regular file, nothing to do" << endl;
+            std::cout << "Input file " << lFile << " is not a regular file, nothing to do" << std::endl;
             return EXIT_FAILURE;
         }
     }
 
     if( boost::filesystem::exists( rFile ) ) {
         if( ! boost::filesystem::is_regular_file( rFile ) ) {
-            cout << "Input file " << rFile << " is not a regular file, nothing to do" << endl;
+            std::cout << "Input file " << rFile << " is not a regular file, nothing to do" << std::endl;
             return EXIT_FAILURE;
         }
     }
 
+    colmap::Timer init_timer;
+    init_timer.Start();
+
+    int device_id = 0;
+
     popsift::cuda::device_prop_t deviceInfo;
-    deviceInfo.set( 0, print_dev_info );
-    if( print_dev_info ) deviceInfo.print( );
+    deviceInfo.set(device_id, print_dev_info);
+    if(print_dev_info)
+    {
+        deviceInfo.print();
+    }
 
-    PopSift PopSift( config, popsift::Config::MatchingMode );
+    PopSift popSift(config, popsift::Config::MatchingMode, PopSift::ByteImages, device_id);
 
-    SiftJob* lJob = process_image( lFile, PopSift );
-    SiftJob* rJob = process_image( rFile, PopSift );
+    std::cout << "Init time: " << init_timer.ElapsedSeconds() << std::endl;
+
+    SiftJob* lJob = process_image(lFile, popSift);
+    SiftJob* rJob = process_image(rFile, popSift);
 
     popsift::FeaturesDev* lFeatures = lJob->getDev();
-    cout << "Number of features:    " << lFeatures->getFeatureCount() << endl;
-    cout << "Number of descriptors: " << lFeatures->getDescriptorCount() << endl;
+    std::cout << "Number of features:    " << lFeatures->getFeatureCount() << std::endl;
+    std::cout << "Number of descriptors: " << lFeatures->getDescriptorCount() << std::endl;
 
     popsift::FeaturesDev* rFeatures = rJob->getDev();
-    cout << "Number of features:    " << rFeatures->getFeatureCount() << endl;
-    cout << "Number of descriptors: " << rFeatures->getDescriptorCount() << endl;
+    std::cout << "Number of features:    " << rFeatures->getFeatureCount() << std::endl;
+    std::cout << "Number of descriptors: " << rFeatures->getDescriptorCount() << std::endl;
 
     lFeatures->match( rFeatures );
 
     delete lFeatures;
     delete rFeatures;
 
-    PopSift.uninit( );
+    popSift.uninit();
 
     return EXIT_SUCCESS;
 }
