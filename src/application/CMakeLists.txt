@@ -4,6 +4,7 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   project(PopsiftDemo LANGUAGES CXX)
 
   option(PopSift_BOOST_USE_STATIC_LIBS "Link examples with static Boost libraries" OFF)
+
   option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
   include(GNUInstallDirs)
@@ -13,6 +14,8 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 endif()
+
+option(PopSift_USE_OpenCV "Link examples with OpenCV libraries" ON)
 
 # enable -fPIE for executables when -fpic
 # https://cmake.org/cmake/help/v3.17/policy/CMP0083.html
@@ -64,19 +67,32 @@ if(PopSift_USE_NVTX_PROFILING)
   list(APPEND PD_LINK_LIBS ${CUDA_NVTX_LIBRARY})
 endif(PopSift_USE_NVTX_PROFILING)
 
+if(PopSift_USE_OpenCV)
+  find_package(OpenCV REQUIRED core highgui)
+  if(NOT OpenCV_FOUND)
+    message(WARNING "OpenCV not found -- Falling back to pgmread")
+  endif()
+endif()
+
 #############################################################
 # popsift-demo
 #############################################################
 
-add_executable(popsift-demo  main.cpp pgmread.cpp pgmread.h)
+add_executable(popsift-demo  main.cpp pgmread.cpp pgmread.h 
+  timer.h timer.cpp string.h string.cpp path.h path.cpp)
 
 set_property(TARGET popsift-demo PROPERTY CXX_STANDARD 11)
 
 target_compile_options(popsift-demo PRIVATE ${PD_COMPILE_OPTIONS} )
 target_include_directories(popsift-demo PUBLIC ${PD_INCLUDE_DIRS})
 target_compile_definitions(popsift-demo PRIVATE ${Boost_DEFINITIONS})
-target_link_libraries(popsift-demo PUBLIC PopSift::popsift ${PD_LINK_LIBS})
+target_link_libraries(popsift-demo PUBLIC PopSift::popsift ${PD_LINK_LIBS} )
 
+if(OpenCV_FOUND)
+  target_compile_options(popsift-demo PRIVATE "-DUSE_OPENCV" )
+  target_include_directories(popsift-demo PUBLIC ${OpenCV_INCLUDE_DIRS} )
+  target_link_libraries(popsift-demo PUBLIC ${OpenCV_LIBS} )
+endif()
 
 #############################################################
 # popsift-match

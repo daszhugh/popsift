@@ -24,6 +24,12 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
+
+
+#ifdef USE_OPENCV
+#include <opencv2/opencv.hpp>
+#endif
 
 #ifdef USE_DEVIL
 #include <devil_cpp_wrapper.hpp>
@@ -36,6 +42,9 @@
 #define nvtxRangePushA(a)
 #define nvtxRangePop()
 #endif
+
+
+#include "timer.h"
 
 using namespace std;
 
@@ -174,7 +183,43 @@ SiftJob* process_image( const string& inputFile, PopSift& PopSift )
     SiftJob* job;
     unsigned char* image_data;
 
-#ifdef USE_DEVIL
+#ifdef USE_OPENCV
+    if(1)
+    {
+        nvtxRangePushA("load and convert image - pgmread");
+        int w{};
+        int h{};
+
+        cv::Mat image = cv::imread(inputFile, cv::IMREAD_GRAYSCALE);
+        w = image.cols;
+        h = image.rows;
+        image_data = new unsigned char[w * h];
+        memcpy(image_data, image.data, w * h* sizeof(unsigned char));
+
+        nvtxRangePop(); // "load and convert image - pgmread"
+
+        if(!float_mode)
+        {
+            // PopSift.init( w, h );
+            job = PopSift.enqueue(w, h, image_data);
+
+            delete[] image_data;
+        }
+        else
+        {
+            auto f_image_data = new float[w * h];
+            for(int i = 0; i < w * h; i++)
+            {
+                f_image_data[i] = float(image_data[i]) / 256.0f;
+            }
+            job = PopSift.enqueue(w, h, f_image_data);
+
+            delete[] image_data;
+            delete[] f_image_data;
+        }
+    }
+    else 
+#else defined USE_DEVIL
     if( ! pgmread_loading )
     {
         if( float_mode )
@@ -252,9 +297,12 @@ void read_job( SiftJob* job, bool really_write )
 
     if( really_write ) {
         nvtxRangePushA( "Writing features to disk" );
-
+        colmap::Timer timer;
+        timer.Start();
         std::ofstream of( "output-features.txt" );
         feature_list->print( of, write_as_uchar );
+
+        std::cout << "Writing time: " << timer.ElapsedSeconds() << std::endl;
     }
     delete feature_list;
 
@@ -306,24 +354,56 @@ int main(int argc, char **argv)
                      popsift::Config::ExtractingMode,
                      float_mode ? PopSift::FloatImages : PopSift::ByteImages );
 
+    double reading_sum_time = 0.0;
+    double detection_sum_time = 0.0;
+
+    size_t reading_count = 0;
+    cout << "Reading..." << endl;
     std::queue<SiftJob*> jobs;
     for(const auto& currFile : inputFiles)
     {
+        colmap::Timer reading_timer;
+        reading_timer.Start();
         SiftJob* job = process_image( currFile, PopSift );
         jobs.push( job );
+
+        double reading_time = reading_timer.ElapsedSeconds();
+        reading_sum_time += reading_time;
+        cout << "Reading time: " << reading_time << endl;
+        ++reading_count;
     }
+
+   size_t detection_count = 0;
 
     while( !jobs.empty() )
     {
+        cout << "Start detecting..." << endl;
+
+        colmap::Timer detection_timer;
+        detection_timer.Start();
         SiftJob* job = jobs.front();
         jobs.pop();
         if( job ) {
             read_job( job, ! dont_write );
             delete job;
         }
+
+  		double detetion_time = detection_timer.ElapsedSeconds();
+        detection_sum_time += detetion_time;
+        cout << "Detetion time: " << detetion_time << endl;
+
+        ++detection_count;
     }
 
     PopSift.uninit( );
+
+    double reading_avg_time = reading_sum_time / reading_count;
+    cout << "Reading sum time: " << reading_sum_time << endl;
+    cout << "Reading avg time: " << reading_avg_time << endl;
+
+    double detection_avg_time = detection_sum_time / detection_count;
+    cout << "Detection sum time: " << detection_sum_time << endl;
+    cout << "Detection avg time: " << detection_avg_time << endl;
 
     return EXIT_SUCCESS;
 }
