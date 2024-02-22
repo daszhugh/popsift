@@ -346,14 +346,25 @@ int main(int argc, char **argv)
         }
     }
 
+
+    colmap::Timer init_timer;
+    init_timer.Start();
+
+    int device_id = 0;
+
     popsift::cuda::device_prop_t deviceInfo;
-    deviceInfo.set( 0, print_dev_info );
-    if( print_dev_info ) deviceInfo.print( );
+    deviceInfo.set(device_id, print_dev_info);
+    if(print_dev_info)
+    {
+        deviceInfo.print();
+    }
 
     PopSift PopSift( config,
                      popsift::Config::ExtractingMode,
-                     float_mode ? PopSift::FloatImages : PopSift::ByteImages );
+                     float_mode ? PopSift::FloatImages : PopSift::ByteImages , device_id);
 
+    cout << "Init time: " << init_timer.ElapsedSeconds() << endl;
+    
     double reading_sum_time = 0.0;
     double detection_sum_time = 0.0;
 
