@@ -356,7 +356,7 @@ int main(int argc, char **argv)
         deviceInfo.print();
     }
 
-    PopSift PopSift( config,
+    PopSift popSift( config,
                      popsift::Config::ExtractingMode,
                      float_mode ? PopSift::FloatImages : PopSift::ByteImages , device_id);
 
@@ -372,7 +372,7 @@ int main(int argc, char **argv)
     {
         colmap::Timer reading_timer;
         reading_timer.Start();
-        SiftJob* job = process_image( currFile, PopSift );
+        SiftJob* job = process_image(currFile, popSift);
         jobs.push( job );
 
         double reading_time = reading_timer.ElapsedSeconds();
@@ -403,7 +403,7 @@ int main(int argc, char **argv)
         ++detection_count;
     }
 
-    PopSift.uninit( );
+    popSift.uninit();
 
     double reading_avg_time = reading_sum_time / reading_count;
     std::cout << "Reading sum time: " << reading_sum_time << std::endl;
