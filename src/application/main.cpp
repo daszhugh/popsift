@@ -46,8 +46,6 @@
 
 #include "timer.h"
 
-using namespace std;
-
 static bool print_dev_info  = false;
 static bool print_time_info = false;
 static bool write_as_uchar  = false;
@@ -55,7 +53,7 @@ static bool dont_write      = false;
 static bool pgmread_loading = false;
 static bool float_mode      = false;
 
-static void parseargs(int argc, char** argv, popsift::Config& config, string& inputFile) {
+static void parseargs(int argc, char** argv, popsift::Config& config, std::string& inputFile) {
     using namespace boost::program_options;
 
     options_description options("Options");
@@ -159,9 +157,9 @@ static void parseargs(int argc, char** argv, popsift::Config& config, string& in
 }
 
 
-static void collectFilenames( list<string>& inputFiles, const boost::filesystem::path& inputFile )
+static void collectFilenames(std::list<std::string>& inputFiles, const boost::filesystem::path& inputFile)
 {
-    vector<boost::filesystem::path> vec;
+    std::vector<boost::filesystem::path> vec;
     std::copy( boost::filesystem::directory_iterator( inputFile ),
                boost::filesystem::directory_iterator(),
                std::back_inserter(vec) );
@@ -178,7 +176,7 @@ static void collectFilenames( list<string>& inputFiles, const boost::filesystem:
     }
 }
 
-SiftJob* process_image( const string& inputFile, PopSift& popSift )
+SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 {
     SiftJob* job;
     unsigned char* image_data;
@@ -224,7 +222,7 @@ SiftJob* process_image( const string& inputFile, PopSift& popSift )
     {
         if( float_mode )
         {
-            cerr << "Cannot combine float-mode test with DevIL image reader" << endl;
+            std::cerr << "Cannot combine float-mode test with DevIL image reader" << std::endl;
             exit( -1 );
         }
 
@@ -236,12 +234,12 @@ SiftJob* process_image( const string& inputFile, PopSift& popSift )
             return 0;
         }
         if( img.Convert( IL_LUMINANCE ) == false ) {
-            cerr << "Failed converting image " << inputFile << " to unsigned greyscale image" << endl;
+            cerr << "Failed converting image " << inputFile << " to unsigned greyscale image" << std::endl;
             exit( -1 );
         }
         const auto w = img.Width();
         const auto h = img.Height();
-        cout << "Loading " << w << " x " << h << " image " << inputFile << endl;
+        std::cout << "Loading " << w << " x " << h << " image " << inputFile << std::endl;
 
         image_data = img.GetData();
 
@@ -291,9 +289,8 @@ SiftJob* process_image( const string& inputFile, PopSift& popSift )
 void read_job( SiftJob* job, bool really_write )
 {
     popsift::Features* feature_list = job->get();
-    cerr << "Number of feature points: " << feature_list->getFeatureCount()
-         << " number of feature descriptors: " << feature_list->getDescriptorCount()
-         << endl;
+    std::cerr << "Number of feature points: " << feature_list->getFeatureCount()
+         << " number of feature descriptors: " << feature_list->getDescriptorCount() << std::endl;
 
     if( really_write ) {
         nvtxRangePushA( "Writing features to disk" );
@@ -316,8 +313,8 @@ int main(int argc, char **argv)
     cudaDeviceReset();
 
     popsift::Config config;
-    list<string>   inputFiles;
-    string         inputFile{};
+    std::list<std::string> inputFiles;
+    std::string inputFile{};
 
     std::cout << "PopSift version: " << POPSIFT_VERSION_STRING << std::endl;
 
@@ -332,16 +329,16 @@ int main(int argc, char **argv)
 
     if( boost::filesystem::exists( inputFile ) ) {
         if( boost::filesystem::is_directory( inputFile ) ) {
-            cout << "BOOST " << inputFile << " is directory" << endl;
+            std::cout << "BOOST " << inputFile << " is directory" << std::endl;
             collectFilenames( inputFiles, inputFile );
             if( inputFiles.empty() ) {
-                cerr << "No files in directory, nothing to do" << endl;
+                std::cerr << "No files in directory, nothing to do" << std::endl;
                 return EXIT_SUCCESS;
             }
         } else if( boost::filesystem::is_regular_file( inputFile ) ) {
             inputFiles.push_back( inputFile );
         } else {
-            cout << "Input file is neither regular file nor directory, nothing to do" << endl;
+            std::cout << "Input file is neither regular file nor directory, nothing to do" << std::endl;
             return EXIT_FAILURE;
         }
     }
@@ -363,13 +360,13 @@ int main(int argc, char **argv)
                      popsift::Config::ExtractingMode,
                      float_mode ? PopSift::FloatImages : PopSift::ByteImages , device_id);
 
-    cout << "Init time: " << init_timer.ElapsedSeconds() << endl;
+    std::cout << "Init time: " << init_timer.ElapsedSeconds() << std::endl;
     
     double reading_sum_time = 0.0;
     double detection_sum_time = 0.0;
 
     size_t reading_count = 0;
-    cout << "Reading..." << endl;
+    std::cout << "Reading..." << std::endl;
     std::queue<SiftJob*> jobs;
     for(const auto& currFile : inputFiles)
     {
@@ -380,7 +377,7 @@ int main(int argc, char **argv)
 
         double reading_time = reading_timer.ElapsedSeconds();
         reading_sum_time += reading_time;
-        cout << "Reading time: " << reading_time << endl;
+        std::cout << "Reading time: " << reading_time << std::endl;
         ++reading_count;
     }
 
@@ -388,7 +385,7 @@ int main(int argc, char **argv)
 
     while( !jobs.empty() )
     {
-        cout << "Start detecting..." << endl;
+        std::cout << "Start detecting..." << std::endl;
 
         colmap::Timer detection_timer;
         detection_timer.Start();
@@ -401,7 +398,7 @@ int main(int argc, char **argv)
 
   		double detetion_time = detection_timer.ElapsedSeconds();
         detection_sum_time += detetion_time;
-        cout << "Detetion time: " << detetion_time << endl;
+                std::cout << "Detetion time: " << detetion_time << std::endl;
 
         ++detection_count;
     }
@@ -409,12 +406,12 @@ int main(int argc, char **argv)
     PopSift.uninit( );
 
     double reading_avg_time = reading_sum_time / reading_count;
-    cout << "Reading sum time: " << reading_sum_time << endl;
-    cout << "Reading avg time: " << reading_avg_time << endl;
+    std::cout << "Reading sum time: " << reading_sum_time << std::endl;
+    std::cout << "Reading avg time: " << reading_avg_time << std::endl;
 
     double detection_avg_time = detection_sum_time / detection_count;
-    cout << "Detection sum time: " << detection_sum_time << endl;
-    cout << "Detection avg time: " << detection_avg_time << endl;
+    std::cout << "Detection sum time: " << detection_sum_time << std::endl;
+    std::cout << "Detection avg time: " << detection_avg_time << std::endl;
 
     return EXIT_SUCCESS;
 }
