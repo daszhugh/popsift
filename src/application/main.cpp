@@ -362,8 +362,14 @@ int main(int argc, char **argv)
 
     std::cout << "Init time: " << init_timer.ElapsedSeconds() << std::endl;
     
+
+    colmap::Timer all_timer;
+    all_timer.Start();
+
+    double all_sum_time = 0.0;
     double reading_sum_time = 0.0;
     double detection_sum_time = 0.0;
+    double readingjob_sum_time = 0.0;
 
     size_t reading_count = 0;
     std::cout << "Reading..." << std::endl;
@@ -381,14 +387,14 @@ int main(int argc, char **argv)
         ++reading_count;
     }
 
-   size_t detection_count = 0;
+   size_t readingjob_count = 0;
 
     while( !jobs.empty() )
     {
-        std::cout << "Start detecting..." << std::endl;
+        std::cout << "Reading job..." << std::endl;
 
-        colmap::Timer detection_timer;
-        detection_timer.Start();
+        colmap::Timer readingjob_timer;
+        readingjob_timer.Start();
         SiftJob* job = jobs.front();
         jobs.pop();
         if( job ) {
@@ -396,20 +402,33 @@ int main(int argc, char **argv)
             delete job;
         }
 
-  		double detetion_time = detection_timer.ElapsedSeconds();
-        detection_sum_time += detetion_time;
-                std::cout << "Detetion time: " << detetion_time << std::endl;
+  		double readingjob_time = readingjob_timer.ElapsedSeconds();
+        readingjob_sum_time += readingjob_time;
+                std::cout << "Reading job time: " << readingjob_time << std::endl;
 
-        ++detection_count;
+        ++readingjob_count;
     }
 
+    all_sum_time =  all_timer.ElapsedSeconds();
+    
     popSift.uninit();
-
+  
     double reading_avg_time = reading_sum_time / reading_count;
+    std::cout << "Reading count: " << reading_count << std::endl;
     std::cout << "Reading sum time: " << reading_sum_time << std::endl;
     std::cout << "Reading avg time: " << reading_avg_time << std::endl;
 
+    double readingjob_avg_time = readingjob_sum_time / readingjob_count;
+    std::cout << "Readingjob count: " << readingjob_count << std::endl;
+    std::cout << "Readingjob sum time: " << readingjob_sum_time << std::endl;
+    std::cout << "Readingjob avg time: " << readingjob_avg_time << std::endl;
+
+
+    size_t detection_count = readingjob_count;
+    detection_sum_time = all_sum_time - reading_sum_time;
+
     double detection_avg_time = detection_sum_time / detection_count;
+    std::cout << "Detection count: " << detection_count << std::endl;
     std::cout << "Detection sum time: " << detection_sum_time << std::endl;
     std::cout << "Detection avg time: " << detection_avg_time << std::endl;
 
