@@ -367,12 +367,12 @@ int main(int argc, char **argv)
     all_timer.Start();
 
     double all_sum_time = 0.0;
-    double reading_sum_time = 0.0;
+    double readingimg_sum_time = 0.0;
     double detection_sum_time = 0.0;
     double readingjob_sum_time = 0.0;
 
-    size_t reading_count = 0;
-    std::cout << "Reading..." << std::endl;
+    size_t readingimg_count = 0;
+    std::cout << "Reading image..." << std::endl;
     std::queue<SiftJob*> jobs;
     for(const auto& currFile : inputFiles)
     {
@@ -381,10 +381,10 @@ int main(int argc, char **argv)
         SiftJob* job = process_image(currFile, popSift);
         jobs.push( job );
 
-        double reading_time = reading_timer.ElapsedSeconds();
-        reading_sum_time += reading_time;
-        std::cout << "Reading time: " << reading_time << std::endl;
-        ++reading_count;
+        double readingimg_time = reading_timer.ElapsedSeconds();
+        readingimg_count += readingimg_time;
+        std::cout << "Reading image time: " << readingimg_time << std::endl;
+        ++readingimg_count;
     }
 
    size_t readingjob_count = 0;
@@ -413,19 +413,18 @@ int main(int argc, char **argv)
     
     popSift.uninit();
   
-    double reading_avg_time = reading_sum_time / reading_count;
-    std::cout << "Reading count: " << reading_count << std::endl;
-    std::cout << "Reading sum time: " << reading_sum_time << std::endl;
-    std::cout << "Reading avg time: " << reading_avg_time << std::endl;
+    double readingimg_avg_time = readingimg_sum_time / readingimg_count;
+    std::cout << "Reading image count: " << readingimg_count << std::endl;
+    std::cout << "Reading image sum time: " << readingimg_sum_time << std::endl;
+    std::cout << "Reading image avg time: " << readingimg_avg_time << std::endl;
 
     double readingjob_avg_time = readingjob_sum_time / readingjob_count;
-    std::cout << "Readingjob count: " << readingjob_count << std::endl;
-    std::cout << "Readingjob sum time: " << readingjob_sum_time << std::endl;
-    std::cout << "Readingjob avg time: " << readingjob_avg_time << std::endl;
-
+    std::cout << "Reading job count: " << readingjob_count << std::endl;
+    std::cout << "Reading job sum time: " << readingjob_sum_time << std::endl;
+    std::cout << "Reading job avg time: " << readingjob_avg_time << std::endl;
 
     size_t detection_count = readingjob_count;
-    detection_sum_time = all_sum_time - reading_sum_time;
+    detection_sum_time = all_sum_time - readingimg_sum_time;
 
     double detection_avg_time = detection_sum_time / detection_count;
     std::cout << "Detection count: " << detection_count << std::endl;
