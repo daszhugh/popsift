@@ -97,6 +97,8 @@ public:
     void setFeatures( popsift::FeaturesBase* f );
 
     void setError(std::exception_ptr ptr);
+
+    void freeImageData();
 };
 
 /**

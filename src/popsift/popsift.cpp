@@ -338,6 +338,7 @@ void PopSift::extractDownloadLoop( )
         }
 
         job->setFeatures( features );
+        job->freeImageData();
     }
 
     private_uninit();
@@ -479,6 +480,12 @@ popsift::FeaturesDev* SiftJob::getDev()
 void SiftJob::setError(std::exception_ptr ptr)
 {
     this->_err = ptr;
+}
+
+void SiftJob::freeImageData()
+{
+    free(_imageData);
+    _imageData = nullptr;
 }
 
 void PopSift::Pipe::uninit()
