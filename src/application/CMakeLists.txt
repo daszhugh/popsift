@@ -79,7 +79,8 @@ endif()
 #############################################################
 
 add_executable(popsift-demo  main.cpp pgmread.cpp pgmread.h 
-  timer.h timer.cpp string.h string.cpp path.h path.cpp)
+  timer.h timer.cpp string.h string.cpp path.h path.cpp 
+  threading.h threading.cpp )
 
 set_property(TARGET popsift-demo PROPERTY CXX_STANDARD 11)
 
@@ -99,7 +100,8 @@ endif()
 #############################################################
 
 add_executable(popsift-match match.cpp pgmread.cpp pgmread.h
-  timer.h timer.cpp string.h string.cpp path.h path.cpp)
+  timer.h timer.cpp string.h string.cpp path.h path.cpp 
+  threading.h threading.cpp )
 
 set_property(TARGET popsift-match PROPERTY CXX_STANDARD 11)
 

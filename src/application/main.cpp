@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <algorithm>
+#include <mutex>
 
 
 #ifdef USE_OPENCV
@@ -45,6 +46,7 @@
 
 
 #include "timer.h"
+#include "threading.h"
 
 static bool print_dev_info  = false;
 static bool print_time_info = false;
@@ -198,7 +200,7 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 
         if(!float_mode)
         {
-            // popSift.init( w, h );
+            // popSift.init( block_w, block_h );
             job = popSift.enqueue(w, h, image_data);
 
             delete[] image_data;
@@ -237,15 +239,15 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
             cerr << "Failed converting image " << inputFile << " to unsigned greyscale image" << std::endl;
             exit( -1 );
         }
-        const auto w = img.Width();
-        const auto h = img.Height();
-        std::cout << "Loading " << w << " x " << h << " image " << inputFile << std::endl;
+        const auto block_w = img.Width();
+        const auto block_h = img.Height();
+        std::cout << "Loading " << block_w << " x " << block_h << " image " << inputFile << std::endl;
 
         image_data = img.GetData();
 
         nvtxRangePop( ); // "load and convert image - devil"
 
-        job = popSift.enqueue( w, h, image_data );
+        job = popSift.enqueue( block_w, block_h, image_data );
 
         img.Clear();
     }
@@ -264,7 +266,7 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 
         if( ! float_mode )
         {
-            // popSift.init( w, h );
+            // popSift.init( block_w, block_h );
             job = popSift.enqueue( w, h, image_data );
 
             delete [] image_data;
@@ -286,9 +288,90 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
     return job;
 }
 
+bool process_image2(const std::string& inputFile,
+                    PopSift& popSift,
+                    std::mutex& jobs_mutex,
+                    std::queue<SiftJob*>& jobs,
+                    int max_rows = 4000,
+                    int max_cols = 6000)
+{  
+    if(inputFile.empty())
+    {
+        return false;
+    }
+
+    cv::Mat image = cv::imread(inputFile, cv::IMREAD_GRAYSCALE);
+    if(image.empty())
+    {
+        return false;
+    }
+
+    std::vector<cv::Rect> rects;
+    {
+        int rows = image.rows;
+        int cols = image.cols;
+
+        while(rows > max_rows)
+        {
+            rows /= 2;
+        }
+
+        while(cols > max_cols)
+        {
+            cols /= 2;
+        }
+
+        int row_blocks = (image.rows + rows - 1) / rows;
+        int col_blocks = (image.cols + cols - 1) / cols;
+
+        for(int r = 0; r < row_blocks; ++r)
+        {
+            int y_beg = r * rows;
+            int y_end = std::min(y_beg + rows, image.rows);
+            int y_size = y_end - y_beg;
+
+            for(int c = 0; c < col_blocks; ++c)
+            {
+                int x_beg = c * cols;
+                int x_end = std::min(x_beg + cols, image.cols);
+                int x_size = x_end - x_beg;
+
+                rects.emplace_back(x_beg, y_beg, x_size, y_size);
+            }
+        }
+    }
+  
+    {
+        std::unique_lock<std::mutex> jobs_lock(jobs_mutex);
+        for(const auto& rect : rects)
+        {
+            cv::Mat block_image_u8 = image(rect).clone();
+            int block_w = rect.width;
+            int block_h = rect.height;
+
+            SiftJob* job = nullptr;
+
+            if(!float_mode)
+            {
+                job = popSift.enqueue(block_w, block_h, block_image_u8.ptr<uchar>(0));
+            }
+            else
+            {
+                cv::Mat block_image_f32;
+                block_image_u8.convertTo(block_image_f32, CV_32F, 1 / 256.0);
+                job = popSift.enqueue(block_w, block_h, block_image_f32.ptr<float>(0));
+            }
+
+            jobs.push(job);
+        }
+    }
+
+    return true;
+}
+
 void read_job( SiftJob* job, bool really_write )
 {
-    popsift::Features* feature_list = job->get();
+    popsift::Features* feature_list = job->getHost();
     std::cerr << "Number of feature points: " << feature_list->getFeatureCount()
          << " number of feature descriptors: " << feature_list->getDescriptorCount() << std::endl;
 
@@ -306,6 +389,39 @@ void read_job( SiftJob* job, bool really_write )
     if( really_write ) {
         nvtxRangePop( ); // Writing features to disk
     }
+}
+
+struct PopSIFTFeatures
+{
+    std::vector<popsift::Feature> features;
+    std::vector<popsift::Descriptor> descriptors;
+};
+
+PopSIFTFeatures CreateFeatures(popsift::Features* in_features)
+{
+    PopSIFTFeatures out_features;
+    out_features.features.resize(in_features->getFeatureCount());
+    out_features.descriptors.resize(in_features->getDescriptorCount());
+
+    std::memcpy(out_features.features.data(),
+                in_features->getFeatures(),
+                sizeof(popsift::Feature) * in_features->getFeatureCount());
+
+    std::memcpy(out_features.descriptors.data(),
+                in_features->getDescriptors(),
+                sizeof(popsift::Descriptor) * in_features->getDescriptorCount());
+
+    return out_features;
+}
+
+void read_job2(SiftJob* job, std::vector<PopSIFTFeatures>& features)
+{
+    popsift::Features* feature_list = job->getHost();
+    std::cerr << "Number of feature points: " << feature_list->getFeatureCount()
+              << " number of feature descriptors: " << feature_list->getDescriptorCount() << std::endl;
+
+    features.emplace_back(CreateFeatures(feature_list));
+    delete feature_list;
 }
 
 int main(int argc, char **argv)
@@ -343,7 +459,6 @@ int main(int argc, char **argv)
         }
     }
 
-
     colmap::Timer init_timer;
     init_timer.Start();
 
@@ -356,80 +471,72 @@ int main(int argc, char **argv)
         deviceInfo.print();
     }
 
-    PopSift popSift( config,
-                     popsift::Config::ExtractingMode,
-                     float_mode ? PopSift::FloatImages : PopSift::ByteImages , device_id);
+    std::vector<std::string> input_files;
+    input_files.reserve(inputFiles.size());
+    for(const auto& currFile : inputFiles)
+    {
+        input_files.emplace_back(currFile);
+    }
+
+    int max_rows = 2000;
+    int max_cols = 6000;
+
+    PopSift popSift(
+      config, popsift::Config::ExtractingMode, float_mode ? PopSift::FloatImages : PopSift::ByteImages, device_id);
 
     std::cout << "Init time: " << init_timer.ElapsedSeconds() << std::endl;
-    
 
     colmap::Timer all_timer;
     all_timer.Start();
 
-    double all_sum_time = 0.0;
-    double readingimg_sum_time = 0.0;
-    double detection_sum_time = 0.0;
-    double readingjob_sum_time = 0.0;
+    std::unordered_map<size_t, std::queue<SiftJob*>> image_jobs;
 
-    size_t readingimg_count = 0;
-    std::cout << "Reading image..." << std::endl;
-    std::queue<SiftJob*> jobs;
-    for(const auto& currFile : inputFiles)
+    std::mutex jobs_mutex;
+    std::mutex temp_mutex;
+
+    colmap::ThreadPool thread_pool(6);
+    for(size_t i = 0; i < input_files.size(); ++i)
     {
-        colmap::Timer reading_timer;
-        reading_timer.Start();
-        SiftJob* job = process_image(currFile, popSift);
-        jobs.push( job );
+        auto& jobs = image_jobs[i];
 
-        double readingimg_time = reading_timer.ElapsedSeconds();
-        readingimg_count += readingimg_time;
-        std::cout << "Reading image time: " << readingimg_time << std::endl;
-        ++readingimg_count;
+        thread_pool.AddTask(
+          [&](size_t i) {
+              const auto& currFile = input_files[i];
+              colmap::Timer reading_timer;
+              reading_timer.Start();
+
+              process_image2(currFile, popSift, jobs_mutex, jobs, max_rows, max_cols);
+
+              double readingimg_time = reading_timer.ElapsedSeconds();
+
+              std::lock_guard<std::mutex> temp_lock(temp_mutex);
+              std::cout << "Reading image time: " << readingimg_time << std::endl;
+          },
+          i);
     }
+    thread_pool.Wait();
 
-   size_t readingjob_count = 0;
-
-    while( !jobs.empty() )
+    for(auto& kv : image_jobs)
     {
-        std::cout << "Reading job..." << std::endl;
+        auto& jobs = kv.second;
 
-        colmap::Timer readingjob_timer;
-        readingjob_timer.Start();
-        SiftJob* job = jobs.front();
-        jobs.pop();
-        if( job ) {
-            read_job( job, ! dont_write );
-            delete job;
+        std::vector<PopSIFTFeatures> features;
+        while(!jobs.empty())
+        {
+            SiftJob* job = jobs.front();
+            jobs.pop();
+            if(job)
+            {
+                read_job2(job, features);
+                delete job;
+            }
         }
-
-  		double readingjob_time = readingjob_timer.ElapsedSeconds();
-        readingjob_sum_time += readingjob_time;
-                std::cout << "Reading job time: " << readingjob_time << std::endl;
-
-        ++readingjob_count;
     }
 
-    all_sum_time =  all_timer.ElapsedSeconds();
-    
     popSift.uninit();
+
+    std::cout << "All time: " << all_timer.ElapsedSeconds() << std::endl;
   
-    double readingimg_avg_time = readingimg_sum_time / readingimg_count;
-    std::cout << "Reading image count: " << readingimg_count << std::endl;
-    std::cout << "Reading image sum time: " << readingimg_sum_time << std::endl;
-    std::cout << "Reading image avg time: " << readingimg_avg_time << std::endl;
-
-    double readingjob_avg_time = readingjob_sum_time / readingjob_count;
-    std::cout << "Reading job count: " << readingjob_count << std::endl;
-    std::cout << "Reading job sum time: " << readingjob_sum_time << std::endl;
-    std::cout << "Reading job avg time: " << readingjob_avg_time << std::endl;
-
-    size_t detection_count = readingjob_count;
-    detection_sum_time = all_sum_time - readingimg_sum_time;
-
-    double detection_avg_time = detection_sum_time / detection_count;
-    std::cout << "Detection count: " << detection_count << std::endl;
-    std::cout << "Detection sum time: " << detection_sum_time << std::endl;
-    std::cout << "Detection avg time: " << detection_avg_time << std::endl;
 
     return EXIT_SUCCESS;
 }
