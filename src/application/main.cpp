@@ -35,7 +35,7 @@
 #include <devil_cpp_wrapper.hpp>
 #endif
 #include "pgmread.h"
-
+#include "string.h"
 #include "threading.h"
 #include "timer.h"
 
@@ -258,7 +258,7 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
         }
     }
     return job;
-#endiif
+#endif
 
 #ifdef USE_DEVIL
     if(!pgmread_loading)
@@ -327,7 +327,7 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 
 bool process_image2(const std::string& inputFile,
                     PopSift& popSift,
-                    std::mutex& jobs_mutex,
+                    std::mutex& mutex,
                     std::queue<SiftJob*>& jobs,
                     int max_rows = 4000,
                     int max_cols = 6000)
@@ -349,12 +349,14 @@ bool process_image2(const std::string& inputFile,
 
         if(!float_mode)
         {
+            std::lock_guard<std::mutex> lock(mutex);
             job = popSift.enqueue(image.cols, image.rows, image.ptr<uchar>(0));
         }
         else
         {
             cv::Mat image_f32;
             image.convertTo(image_f32, CV_32F, 1 / 256.0);
+            std::lock_guard<std::mutex> lock(mutex);
             job = popSift.enqueue(image.cols, image.rows, image_f32.ptr<float>(0));
         }
 
@@ -399,7 +401,6 @@ bool process_image2(const std::string& inputFile,
     }
 
     {
-        std::unique_lock<std::mutex> jobs_lock(jobs_mutex);
         for(const auto& rect : rects)
         {
             cv::Mat block_image_u8 = image(rect).clone();
@@ -410,13 +411,154 @@ bool process_image2(const std::string& inputFile,
 
             if(!float_mode)
             {
+                std::lock_guard<std::mutex> lock(mutex);
                 job = popSift.enqueue(block_w, block_h, block_image_u8.ptr<uchar>(0));
             }
             else
             {
                 cv::Mat block_image_f32;
                 block_image_u8.convertTo(block_image_f32, CV_32F, 1 / 256.0);
+                std::lock_guard<std::mutex> lock(mutex);
                 job = popSift.enqueue(block_w, block_h, block_image_f32.ptr<float>(0));
+            }
+
+            jobs.push(job);
+        }
+    }
+
+    return true;
+}
+
+bool read_image(const std::string& img_file,
+                std::unordered_map<size_t, cv::Mat>& img_mats,
+                size_t img_id,
+                std::mutex& mutex)
+{
+    if(img_file.empty())
+    {
+        return false;
+    }
+
+    cv::Mat img_mat = cv::imread(img_file, cv::IMREAD_GRAYSCALE);
+    if(img_mat.empty())
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex);
+    img_mats.emplace(img_id, std::move(img_mat));
+    return true;
+}
+
+bool create_jobs(const cv::Mat& img_mat,
+                 PopSift& popSift,
+                 std::mutex& mutex,
+                 std::queue<SiftJob*>& jobs,
+                 int max_rows = 4000,
+                 int max_cols = 6000)
+{
+    const cv::Mat& image = img_mat;
+    if(image.empty())
+    {
+        return false;
+    }
+
+    if(image.cols <= max_cols && image.rows << max_rows)
+    {
+        SiftJob* job = nullptr;
+
+        if(!float_mode)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            job = popSift.enqueue(image.cols, image.rows, image.ptr<uchar>(0));
+        }
+        else
+        {
+            cv::Mat image_f32;
+            image.convertTo(image_f32, CV_32F, 1 / 256.0);
+            std::lock_guard<std::mutex> lock(mutex);
+            job = popSift.enqueue(image.cols, image.rows, image_f32.ptr<float>(0));
+        }
+
+        jobs.push(job);
+
+        return true;
+    }
+
+    std::vector<cv::Rect> rects;
+    {
+        int rows = image.rows;
+        int cols = image.cols;
+
+        while(rows > max_rows)
+        {
+            rows /= 2;
+        }
+
+        while(cols > max_cols)
+        {
+            cols /= 2;
+        }
+
+        int row_blocks = (image.rows + rows - 1) / rows;
+        int col_blocks = (image.cols + cols - 1) / cols;
+
+        for(int r = 0; r < row_blocks; ++r)
+        {
+            int y_beg = r * rows;
+            int y_end = std::min(y_beg + rows, image.rows);
+            int y_size = y_end - y_beg;
+
+            for(int c = 0; c < col_blocks; ++c)
+            {
+                int x_beg = c * cols;
+                int x_end = std::min(x_beg + cols, image.cols);
+                int x_size = x_end - x_beg;
+
+                rects.emplace_back(x_beg, y_beg, x_size, y_size);
+            }
+        }
+    }
+
+    {
+        std::vector<cv::Mat> temp_mats(rects.size());
+
+        for(size_t i = 0; i < rects.size(); ++i)
+        {
+            const auto& rect = rects[i];
+            auto& temp_mat = temp_mats[i];
+
+            cv::Mat block_image_u8 = image(rect).clone();
+
+            if(!float_mode)
+            {
+                temp_mat = std::move(block_image_u8);
+            }
+            else
+            {
+                cv::Mat block_image_f32;
+                block_image_u8.convertTo(block_image_f32, CV_32F, 1 / 256.0);
+                temp_mat = std::move(block_image_f32);
+            }
+        }
+
+        for(size_t i = 0; i < rects.size(); ++i)
+        {
+            const auto& rect = rects[i];
+            auto& temp_mat = temp_mats[i];
+            int block_w = rect.width;
+            int block_h = rect.height;
+
+            SiftJob* job = nullptr;
+
+            if(!float_mode)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                job = popSift.enqueue(block_w, block_h, temp_mat.ptr<uchar>(0));
+            }
+            else
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                job = popSift.enqueue(block_w, block_h, temp_mat.ptr<float>(0));
             }
 
             jobs.push(job);
@@ -469,15 +611,153 @@ PopSIFTFeatures CreateFeatures(popsift::Features* in_features)
 
 void read_job2(SiftJob* job, std::vector<PopSIFTFeatures>& features)
 {
-    popsift::Features* feature_list = job->getHost();
-    std::cerr << "Number of feature points: " << feature_list->getFeatureCount()
-              << " number of feature descriptors: " << feature_list->getDescriptorCount() << std::endl;
+    popsift::Features* feature = job->getHost();
+    if(!feature)
+    {
+        return;
+    }
 
-    features.emplace_back(CreateFeatures(feature_list));
-    delete feature_list;
+    std::cerr << "Number of feature points: " << feature->getFeatureCount()
+              << " number of feature descriptors: " << feature->getDescriptorCount() << std::endl;
+
+    features.emplace_back(CreateFeatures(feature));
+    delete feature;
 }
 
 int main(int argc, char** argv)
+{
+    popsift::cuda::reset();
+
+    popsift::Config config;
+    std::list<std::string> inputFiles;
+    std::string inputFile{};
+
+    std::cout << "PopSift version: " << POPSIFT_VERSION_STRING << std::endl;
+
+    try
+    {
+        parseargs(argc, argv, config, inputFile); // Parse command line
+        std::cout << inputFile << std::endl;
+    }
+    catch(std::exception& e)
+    {
+        std::cout << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    if(boost::filesystem::exists(inputFile))
+    {
+        if(boost::filesystem::is_directory(inputFile))
+        {
+            std::cout << "BOOST " << inputFile << " is directory" << std::endl;
+            collectFilenames(inputFiles, inputFile);
+            if(inputFiles.empty())
+            {
+                std::cerr << "No files in directory, nothing to do" << std::endl;
+                return EXIT_SUCCESS;
+            }
+        }
+        else if(boost::filesystem::is_regular_file(inputFile))
+        {
+            inputFiles.push_back(inputFile);
+        }
+        else
+        {
+            std::cout << "Input file is neither regular file nor directory, nothing to do" << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+
+    colmap::Timer init_timer;
+    init_timer.Start();
+
+    int device_id = 0;
+
+    popsift::cuda::device_prop_t deviceInfo;
+    deviceInfo.set(device_id, print_dev_info);
+    if(print_dev_info)
+    {
+        deviceInfo.print();
+    }
+
+    std::vector<std::string> input_files;
+    input_files.reserve(inputFiles.size());
+    for(const auto& input_file : inputFiles)
+    {
+        input_files.emplace_back(input_file);
+    }
+
+    int max_rows = 4000;
+    int max_cols = 6000;
+
+    PopSift popSift(
+      config, popsift::Config::ExtractingMode, float_mode ? PopSift::FloatImages : PopSift::ByteImages, device_id);
+
+    std::cout << "Init time: " << init_timer.ElapsedSeconds() << std::endl;
+
+    colmap::Timer all_timer;
+    all_timer.Start();
+
+    colmap::Timer all_reading_timer;
+    all_reading_timer.Start();
+
+    std::unordered_map<size_t, std::queue<SiftJob*>> image_jobs;
+
+    std::mutex job_mutex;
+    std::mutex temp_mutex;
+
+    colmap::ThreadPool reading_tp(6);
+    int counter = 0;
+    for(size_t i = 0; i < input_files.size(); ++i)
+    {
+        auto& jobs = image_jobs[i];
+
+        reading_tp.AddTask(
+          [&](size_t i) {
+              const auto& input_file = input_files[i];
+              colmap::Timer reading_timer;
+              reading_timer.Start();
+
+              process_image2(input_file, popSift, job_mutex, jobs, max_rows, max_cols);
+
+              double reading_time = reading_timer.ElapsedSeconds();
+
+              std::lock_guard<std::mutex> temp_lock(temp_mutex);
+              ++counter;
+
+              std::cout << colmap::StringPrintf("Image£º%d ,Reading time:%.6lf ", counter, reading_time) << std::endl;
+          },
+          i);
+    }
+    reading_tp.Wait();
+    double all_reading_time = all_reading_timer.ElapsedSeconds();
+
+    for(auto& kv : image_jobs)
+    {
+        auto& jobs = kv.second;
+
+        std::vector<PopSIFTFeatures> features;
+        while(!jobs.empty())
+        {
+            SiftJob* job = jobs.front();
+            jobs.pop();
+            if(job)
+            {
+                read_job2(job, features);
+                delete job;
+            }
+        }
+    }
+
+    popSift.uninit();
+
+    std::cout << "All reading time: " << all_reading_time << std::endl;
+    std::cout << "All time: " << all_timer.ElapsedSeconds() << std::endl;
+
+    return EXIT_SUCCESS;
+}
+
+int main1(int argc, char** argv)
 {
     popsift::cuda::reset();
 
@@ -540,7 +820,7 @@ int main(int argc, char** argv)
         input_files.emplace_back(currFile);
     }
 
-    int max_rows = 2000;
+    int max_rows = 4000;
     int max_cols = 6000;
 
     PopSift popSift(
@@ -548,36 +828,61 @@ int main(int argc, char** argv)
 
     std::cout << "Init time: " << init_timer.ElapsedSeconds() << std::endl;
 
+    std::unordered_map<size_t, std::queue<SiftJob*>> image_jobs;
+    std::unordered_map<size_t, cv::Mat> image_mats;
+
+    std::mutex job_mutex;
+    std::mutex temp_mutex;
+
+    colmap::ThreadPool reading_tp(6);
+    int num_reading_imgs = 0;
+
     colmap::Timer all_timer;
     all_timer.Start();
 
-    std::unordered_map<size_t, std::queue<SiftJob*>> image_jobs;
-
-    std::mutex jobs_mutex;
-    std::mutex temp_mutex;
-
-    colmap::ThreadPool thread_pool(6);
-
+    colmap::Timer all_reading_timer;
+    all_reading_timer.Start();
     for(size_t i = 0; i < input_files.size(); ++i)
     {
-        auto& jobs = image_jobs[i];
-
-        thread_pool.AddTask(
+        reading_tp.AddTask(
           [&](size_t i) {
-              const auto& currFile = input_files[i];
+              const auto& input_file = input_files[i];
               colmap::Timer reading_timer;
               reading_timer.Start();
 
-              process_image2(currFile, popSift, jobs_mutex, jobs, max_rows, max_cols);
+              if(!read_image(input_file, image_mats, i, job_mutex))
+              {
+                  return;
+              }
 
-              double readingimg_time = reading_timer.ElapsedSeconds();
+              double reading_time = reading_timer.ElapsedSeconds();
 
               std::lock_guard<std::mutex> temp_lock(temp_mutex);
-              std::cout << "Reading image time: " << readingimg_time << std::endl;
+              ++num_reading_imgs;
+
+              std::cout << colmap::StringPrintf("Image£º%d ,Reading time:%.6lf ", num_reading_imgs, reading_time)
+                        << std::endl;
           },
           i);
     }
-    thread_pool.Wait();
+    reading_tp.Wait();
+    double all_reading_time = all_reading_timer.ElapsedSeconds();
+
+    colmap::Timer creating_jobs_timer;
+    creating_jobs_timer.Start();
+    {
+        colmap::ThreadPool creating_tp(4);
+        for(auto& kv : image_mats)
+        {
+            auto& jobs = image_jobs[kv.first];
+            creating_tp.AddTask([&]() {
+                create_jobs(kv.second, popSift, job_mutex, jobs, max_rows, max_cols);
+                kv.second = cv::Mat();
+            });
+        }
+        creating_tp.Wait();
+    }
+    double all_creating_jobs_time = creating_jobs_timer.ElapsedSeconds();
 
     for(auto& kv : image_jobs)
     {
@@ -595,10 +900,13 @@ int main(int argc, char** argv)
             }
         }
     }
+    double all_time = all_timer.ElapsedSeconds();
 
     popSift.uninit();
 
-    std::cout << "All time: " << all_timer.ElapsedSeconds() << std::endl;
+    std::cout << "All reading images time: " << all_reading_time << std::endl;
+    std::cout << "All creating jobs time: " << all_reading_time << std::endl;
+    std::cout << "All time: " << all_time << std::endl;
 
     return EXIT_SUCCESS;
 }
