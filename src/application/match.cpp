@@ -25,6 +25,8 @@
 #include <stdexcept>
 #include <string>
 
+
+
 #ifdef USE_OPENCV
 #include <opencv2/opencv.hpp>
 #endif
@@ -33,13 +35,6 @@
 #include <devil_cpp_wrapper.hpp>
 #endif
 #include "pgmread.h"
-
-#if POPSIFT_IS_DEFINED(POPSIFT_USE_NVTX)
-#include <nvToolsExtCuda.h>
-#else
-#define nvtxRangePushA(a)
-#define nvtxRangePop()
-#endif
 
 #include "timer.h"
 
@@ -175,11 +170,9 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
     unsigned char* image_data;
     SiftJob* job;
 
-    nvtxRangePushA( "load and convert image" );
 #ifdef USE_OPENCV
     if(1)
     {
-        nvtxRangePushA("load and convert image - pgmread");
         int w{};
         int h{};
 
@@ -189,17 +182,16 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
         image_data = new unsigned char[w * h];
         memcpy(image_data, image.data, w * h * sizeof(unsigned char));
 
-        nvtxRangePop(); // "load and convert image - pgmread"
-
-
         // popSift.init( w, h );
         job = popSift.enqueue(w, h, image_data);
 
         delete[] image_data;
 
     }
-    else
-#else defined USE_DEVIL
+    return job;
+#endif
+
+#ifdef USE_DEVIL
     if( ! pgmread_loading )
     {
         ilImage img;
@@ -216,8 +208,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
         std::cout << "Loading " << w << " x " << h << " image " << inputFile << std::endl;
         image_data = img.GetData();
 
-        nvtxRangePop( );
-
         // PopSift.init( w, h );
         job = PopSift.enqueue( w, h, image_data );
 
@@ -233,8 +223,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
             exit( EXIT_FAILURE );
         }
 
-        nvtxRangePop( );
-
         // PopSift.init( w, h );
         job = popSift.enqueue( w, h, image_data );
 
@@ -246,7 +234,7 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 
 int main(int argc, char **argv)
 {
-    cudaDeviceReset();
+    popsift::cuda::reset();
 
     popsift::Config config;
     std::string         lFile{};

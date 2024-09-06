@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - YYYY-MM-DD
 
+## 2024
+
+- CMake: CUDA as first-order language, different CC selection
+
 ### Added
 - Improved checks for CUDA textures [PR](https://github.com/alicevision/popsift/pull/89)
 - CMake: Improved support for all Cuda CC [PR](https://github.com/alicevision/popsift/pull/75)

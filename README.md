@@ -25,7 +25,7 @@ PopSift depends on:
 
 Optionally, for the provided applications:
 
-* Boost >= 1.55 (required components {atomic, chrono, date-time, system, thread}-dev)
+* Boost >= 1.71 (required components {atomic, chrono, date-time, system, thread}-dev)
 
 * DevIL (libdevil-dev) can be used to load a broader range of image formats, otherwise only pgm is supported.
 

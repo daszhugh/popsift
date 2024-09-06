@@ -13,6 +13,15 @@
 namespace popsift {
 namespace cuda {
 
+/** A call to cudaDeviceReset()
+ */
+void reset();
+
+/** A call to cudaDeviceSynchronize()
+ */
+void sync();
+
+
 /**
  * @brief A class to recover, query and print the information about the cuda device.
  */

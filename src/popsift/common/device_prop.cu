@@ -14,6 +14,16 @@ namespace popsift { namespace cuda {
 
 using namespace std;
 
+void reset()
+{
+    cudaDeviceReset();
+}
+
+void sync()
+{
+    cudaDeviceSynchronize();
+}
+
 device_prop_t::device_prop_t( )
 {
     int         currentDevice;

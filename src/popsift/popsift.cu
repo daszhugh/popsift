@@ -298,6 +298,7 @@ void PopSift::uploadImages( )
     while( ( job = _pipe._queue_stage1.pull() ) != nullptr ) {
         popsift::ImageBase* img = _pipe._unused.pull();
         job->setImg( img );
+        job->freeImageData();
         _pipe._queue_stage2.push( job );
     }
     _pipe._queue_stage2.push( nullptr );
@@ -337,8 +338,7 @@ void PopSift::extractDownloadLoop( )
             p._pyramid->save_descriptors( _config, features, "pyramid" );
         }
 
-        job->setFeatures( features );
-        job->freeImageData();
+        job->setFeatures(features);
     }
 
     private_uninit();
@@ -376,7 +376,6 @@ void PopSift::matchPrepareLoop( )
             job->setFeatures(nullptr);
             break;
         }
-
         job->setFeatures( features );
     }
 

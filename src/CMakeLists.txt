@@ -1,6 +1,7 @@
+# Do not specify SHARED or STATIC in add_library. Let the variable BUILD_SHARED_LIBS determine this.
 
-CUDA_ADD_LIBRARY(popsift
-        popsift/popsift.cpp popsift/popsift.h
+add_library(popsift
+        popsift/popsift.cu popsift/popsift.h
         popsift/features.cu popsift/features.h
         popsift/sift_constants.cu popsift/sift_constants.h
         popsift/sift_conf.cu popsift/sift_conf.h
@@ -39,28 +40,35 @@ CUDA_ADD_LIBRARY(popsift
         popsift/common/vec_macros.h
         popsift/common/clamp.h)
 
+target_link_libraries(popsift
+                      PUBLIC
+		      CUDA::cudart
+		      Threads::Threads)
+
+if(PopSift_USE_NVTX_PROFILING)
+target_link_libraries(popsift
+                      PUBLIC
+		      CUDA::nvtx3)
+endif()
+
+set_target_properties(popsift PROPERTIES VERSION ${PROJECT_VERSION})
+set_target_properties(popsift PROPERTIES DEBUG_POSTFIX "d")
+set_target_properties(popsift PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 # build directory containing the automatically generated files
 set(popsift_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 # BUILD_INTERFACE allows to include the directory with source only when target is
 # built in the building tree (ie, not from an install location)
+# The CUDA install dir variable has changed from the old CUDA_INCLUDE_DIRS to the new CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES
 target_include_directories(popsift
             PUBLIC
             $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
             $<BUILD_INTERFACE:${popsift_generated_dir}>
             $<BUILD_INTERFACE:${popsift_generated_dir}/popsift>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
-            ${CUDA_INCLUDE_DIRS})
-
-
-set_target_properties(popsift PROPERTIES VERSION ${PROJECT_VERSION})
-set_target_properties(popsift PROPERTIES DEBUG_POSTFIX "d")
-
-# cannot use PRIVATE here as there is a bug in FindCUDA and CUDA_ADD_LIBRARY
-# https://gitlab.kitware.com/cmake/cmake/issues/16097
-target_link_libraries(popsift ${CUDA_CUDADEVRT_LIBRARY} ${CUDA_CUBLAS_LIBRARIES} Threads::Threads)
-
+	    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+	    )
 
 # EXPORTING THE LIBRARY
 #

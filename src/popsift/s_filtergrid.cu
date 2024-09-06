@@ -10,7 +10,7 @@
 #include "sift_pyramid.h"
 
 #if POPSIFT_IS_DEFINED(POPSIFT_USE_NVTX)
-#include <nvToolsExtCuda.h>
+#include <nvtx3/nvToolsExtCuda.h>
 #else
 #define nvtxRangePushA(a)
 #define nvtxRangePop()

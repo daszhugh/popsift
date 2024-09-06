@@ -1,7 +1,26 @@
-# CMake below 3.4 does not work with CUDA separable compilation at all
-cmake_minimum_required(VERSION 3.12)
+# First-order language CUDA requires at least CMake 3.18
+cmake_minimum_required(VERSION 3.24)
 
-project(PopSift VERSION 1.0.0 LANGUAGES CXX)
+# Default seletion of CUDA Compute Capabilities.
+# This must be called before project() or cmake sets it to the oldest non-deprecated CC
+# "all" and "all-major" work for Intel and perhaps for ARM with discrete GPUs, but not Tegra and Jetson.
+if(EXISTS "/etc/nv_tegra_release")
+  # The CC list for Tegras and Jetson will require manual updates
+  set(CMAKE_CUDA_ARCHITECTURES "53;62;72;87"
+      CACHE
+      STRING "Which CUDA CCs to support: native, all, all-major or an explicit list delimited by semicolons")
+else()
+  # The CC list for discrete GPUs will require CMake updates
+  set(CMAKE_CUDA_ARCHITECTURES "all-major"
+      CACHE
+      STRING "Which CUDA CCs to support: native, all, all-major or an explicit list delimited by semicolons")
+endif()
+
+project(PopSift VERSION 1.0.0 LANGUAGES CXX CUDA)
+
+# Policy to support CUDA as a first-order language for CMake.
+# Since CMake 3.18. See https://cmake.org/cmake/help/latest/policy/CMP0104.html
+cmake_policy(SET CMP0104 NEW)
 
 # Set build path as a folder named as the platform (linux, windows, darwin...) plus the processor type
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
@@ -13,10 +32,8 @@ option(PopSift_USE_NVTX_PROFILING     "Use CUDA NVTX for profiling." OFF)
 option(PopSift_ERRCHK_AFTER_KERNEL     "Synchronize and check CUDA error after every kernel." OFF)
 option(PopSift_USE_POSITION_INDEPENDENT_CODE "Generate position independent code." ON)
 option(PopSift_USE_GRID_FILTER "Switch off grid filtering to massively reduce compile time while debugging other things." ON)
-option(PopSift_USE_NORMF "The __normf function computes Euclidean distance on large arrays. Fast but stability is uncertain." OFF)
 option(PopSift_NVCC_WARNINGS "Switch on several additional warning for CUDA nvcc" OFF)
 option(PopSift_USE_TEST_CMD "Add testing step for functional verification" OFF)
-option(PopSift_NO_DEPRECATED_CUDA_SM_WARNINGS "Suppress warnings about soon to be deprecated cuda SM" ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
 if(PopSift_USE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
@@ -55,17 +72,15 @@ include(GNUInstallDirs)
 
 if(BUILD_SHARED_LIBS)
   message(STATUS "BUILD_SHARED_LIBS ON")
-  # Need to declare CUDA_USE_STATIC_CUDA_RUNTIME as an option to ensure that it is not overwritten in FindCUDA.
-  option(CUDA_USE_STATIC_CUDA_RUNTIME "Use the static version of the CUDA runtime library if available" OFF)
-  set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
-  # Workaround to force deactivation of cuda static runtime for cmake < 3.10
-  set(CUDA_cudart_static_LIBRARY 0)
+
   # Auto-build dll exports on Windows
   set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 else()
   message(STATUS "BUILD_SHARED_LIBS OFF")
-  option(CUDA_USE_STATIC_CUDA_RUNTIME "Use the static version of the CUDA runtime library if available" ON)
-  set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
+
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
 endif()
 
 # Require threads because of std::thread.
@@ -74,26 +89,15 @@ find_package(Threads REQUIRED)
 ###################
 #  CUDA
 ###################
-find_package(CUDA 7.0 REQUIRED)
+include(CheckLanguage)
+check_language(CUDA)
 
-if(NOT CUDA_FOUND)
-  message(FATAL_ERROR "Could not find CUDA >= 7.0")
-endif()
+# Use this if necessary: "cmake -DCUDAToolkit_ROOT=/some/path"
+# target_link_libraries(binary_linking_to_cudart PRIVATE CUDA::cudart)
+find_package(CUDAToolkit)
 
-message(STATUS "CUDA Version is ${CUDA_VERSION}")
-
-include(ChooseCudaCC)
-if(NOT DEFINED PopSift_CUDA_CC_LIST)
-  chooseCudaCC(PopSift_CUDA_CC_LIST_BASIC
-               PopSift_CUDA_GENCODE_FLAGS
-               MIN_CC 30
-               MIN_CUDA_VERSION 7.0)
-  set(PopSift_CUDA_CC_LIST ${PopSift_CUDA_CC_LIST_BASIC} CACHE STRING "CUDA CC versions to compile")
-else()
-  getFlagsForCudaCCList(PopSift_CUDA_CC_LIST
-                        PopSift_CUDA_GENCODE_FLAGS)
-endif()
-list(APPEND CUDA_NVCC_FLAGS "${PopSift_CUDA_GENCODE_FLAGS}")
+message(STATUS "CUDA Version is ${CUDAToolkit_VERSION}")
+set(CUDA_VERSION ${CUDAToolkit_VERSION})
 
 if(PopSift_USE_NVTX_PROFILING)
   message(STATUS "PROFILING CPU CODE: NVTX is in use")
@@ -104,46 +108,8 @@ if(PopSift_ERRCHK_AFTER_KERNEL)
   list(APPEND CUDA_NVCC_FLAGS "-DERRCHK_AFTER_KERNEL")
 endif()
 
-set(CUDA_SEPARABLE_COMPILATION ON)
-
-if(PopSift_NO_DEPRECATED_CUDA_SM_WARNINGS)
-  list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
-endif()
-
-if(UNIX AND NOT APPLE)
-  list(APPEND CUDA_NVCC_FLAGS         "-Xcompiler;-rdynamic")
-  # set(CUDA_NVCC_FLAGS       "${CUDA_NVCC_FLAGS};-Xptxas;-v")
-  # set(CUDA_NVCC_FLAGS       "${CUDA_NVCC_FLAGS};-Xptxas;-warn-double-usage")
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG   "--keep")
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG   "--source-in-ptx")
-endif()
-
-# The following if should not be necessary, but apparently there is a bug in FindCUDA.cmake that
-# generate an empty string in the nvcc command line causing the compilation to fail.
-# see https://gitlab.kitware.com/cmake/cmake/issues/16411
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  message(STATUS "Building in debug mode")
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG   "-G")
-endif()
-list(APPEND CUDA_NVCC_FLAGS_RELEASE "-O3")
-
-if(PopSift_USE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler;-fPIC")
-endif()
-
-# this is to ensure that on MSVC the flags for the linker are properly propagate even to the intermediate
-# linking step. This seems not the case e.g. on vcpkg using ninja build.
-if(MSVC)
-  if(BUILD_SHARED_LIBS)
-    set(PopSift_MVSC_LINKER "/MD")
-  else()
-    set(PopSift_MVSC_LINKER "/MT")
-  endif()
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      set(PopSift_MVSC_LINKER "${PopSift_MVSC_LINKER}d")
-  endif()
-  list(APPEND CUDA_NVCC_FLAGS   -Xcompiler ${PopSift_MVSC_LINKER})
-endif()
+# This may not be required any more.
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
 # default stream per-thread implies that each host thread has one non-synchronizing 0-stream
 # currently, the code requires legacy mode
@@ -159,7 +125,7 @@ if(CUDA_VERSION VERSION_GREATER_EQUAL "7.5")
   endif()
 endif()
 
-set(PopSift_CXX_STANDARD 14) # Thrust/CUB requires C++14 starting with CUDA SDK 11
+set(PopSift_CXX_STANDARD 17) # Thrust/CUB requires C++14 starting with CUDA SDK 11
 if(CUDA_VERSION_MAJOR LESS_EQUAL 8)
   set(PopSift_CXX_STANDARD 11)
 endif()
@@ -174,16 +140,10 @@ set(CMAKE_CUDA_STANDARD ${PopSift_CXX_STANDARD})
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 
-if(PopSift_USE_NORMF AND CUDA_VERSION VERSION_GREATER_EQUAL "7.5")
-  set(PopSift_HAVE_NORMF   1)
-else()
-  set(PopSift_HAVE_NORMF   0)
-endif()
-
 if(CUDA_VERSION VERSION_GREATER_EQUAL "9.0")
-  set(HAVE_SHFL_DOWN_SYNC   1)
+  set(PopSift_HAVE_SHFL_DOWN_SYNC   1)
 else()
-  set(HAVE_SHFL_DOWN_SYNC   0)
+  set(PopSift_HAVE_SHFL_DOWN_SYNC   0)
 endif()
 
 if(NOT PopSift_USE_GRID_FILTER)
@@ -193,12 +153,8 @@ else()
   set(DISABLE_GRID_FILTER   0)
 endif()
 
-# library required for CUDA dynamic parallelism, forgotten by CMake 3.4
-cuda_find_library_local_first(CUDA_CUDADEVRT_LIBRARY cudadevrt "\"cudadevrt\" library")
-
 if(PopSift_USE_NVTX_PROFILING)
   # library required for NVTX profiling of the CPU
-  cuda_find_library_local_first(CUDA_NVTX_LIBRARY nvToolsExt "NVTX library")
   set(PopSift_USE_NVTX 1)
 else()
   set(PopSift_USE_NVTX 0)
@@ -245,9 +201,14 @@ message(STATUS "Use CUDA NVTX for profiling: " ${PopSift_USE_NVTX_PROFILING})
 message(STATUS "Synchronize and check CUDA error after every kernel: " ${PopSift_ERRCHK_AFTER_KERNEL})
 message(STATUS "Grid filtering: " ${PopSift_USE_GRID_FILTER})
 message(STATUS "Additional warning for CUDA nvcc: " ${PopSift_NVCC_WARNINGS})
-message(STATUS "Compiling for CUDA CCs: ${PopSift_CUDA_CC_LIST}")
 message(STATUS "Install path: " ${CMAKE_INSTALL_PREFIX})
 message(STATUS "Testing step: " ${PopSift_USE_TEST_CMD})
+
+message(STATUS "CMAKE_CUDA_COMPILER = ${CMAKE_CUDA_COMPILER}")
+message(STATUS "CMAKE_CUDA_COMPILER_ID = ${CMAKE_CUDA_COMPILER_ID}")
+message(STATUS "CMAKE_CUDA_COMPILER_VERSION = ${CMAKE_CUDA_COMPILER_VERSION}")
+message(STATUS "CMAKE_CUDA_ARCHITECTURES = ${CMAKE_CUDA_ARCHITECTURES}")
+
 if(PopSift_USE_TEST_CMD)
   message(STATUS "Path for test input: " ${PopSift_TESTFILE_PATH})
 endif()

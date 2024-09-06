@@ -15,20 +15,27 @@
 #ifndef NINF
 #define NINF              (-INF)
 #endif
-#ifdef M_PI
-#undef M_PI
-// #define M_PI  3.14159265358979323846f
-#endif
-__device__ static const
-float M_PI = 3.14159265358979323846f;
-#ifdef M_PI2
-#undef M_PI2
-// #define M_PI2 (2.0F * M_PI)
-#endif
-__device__ static const
-float M_PI2 = 2.0f * 3.14159265358979323846f;
 
-#define M_4RPI               (4.0f / M_PI)
+#undef USE_CONSTANT_PI
+#ifdef USE_CONSTANT_PI
+  #ifdef M_PI
+    #undef M_PI
+  #endif
+  __device__ static const float M_PI = 3.14159265358979323846f;
+  #ifdef M_PI2
+    #undef M_PI2
+  #endif
+  __device__ static const float M_PI2 = 2.0f * 3.14159265358979323846f;
+  #define M_4RPI               (4.0f / M_PI)
+#else
+  #ifndef M_PI
+    #define M_PI 3.14159265358979323846f
+  #endif
+  #ifndef M_PI2
+    #define M_PI2 (2.0F * M_PI)
+  #endif
+  #define M_4RPI               (4.0f / M_PI)
+#endif
 
 #define DESC_MIN_FLOAT               1E-15F
 

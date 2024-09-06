@@ -36,13 +36,6 @@
 #endif
 #include "pgmread.h"
 
-#if POPSIFT_IS_DEFINED(POPSIFT_USE_NVTX)
-#include <nvToolsExtCuda.h>
-#else
-#define nvtxRangePushA(a)
-#define nvtxRangePop()
-#endif
-
 #include "threading.h"
 #include "timer.h"
 
@@ -235,7 +228,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 #ifdef USE_OPENCV
     if(1)
     {
-        nvtxRangePushA("load and convert image - pgmread");
         int w{};
         int h{};
 
@@ -244,8 +236,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
         h = image.rows;
         image_data = new unsigned char[w * h];
         memcpy(image_data, image.data, w * h * sizeof(unsigned char));
-
-        nvtxRangePop(); // "load and convert image - pgmread"
 
         if(!float_mode)
         {
@@ -267,8 +257,10 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
             delete[] f_image_data;
         }
     }
-    else
-#else defined USE_DEVIL
+    return job;
+#endiif
+
+#ifdef USE_DEVIL
     if(!pgmread_loading)
     {
         if(float_mode)
@@ -276,8 +268,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
             std::cerr << "Cannot combine float-mode test with DevIL image reader" << std::endl;
             exit(-1);
         }
-
-        nvtxRangePushA("load and convert image - devil");
 
         ilImage img;
         if(img.Load(inputFile.c_str()) == false)
@@ -296,8 +286,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
 
         image_data = img.GetData();
 
-        nvtxRangePop(); // "load and convert image - devil"
-
         job = popSift.enqueue(block_w, block_h, image_data);
 
         img.Clear();
@@ -305,7 +293,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
     else
 #endif
     {
-        nvtxRangePushA("load and convert image - pgmread");
         int w{};
         int h{};
         image_data = readPGMfile(inputFile, w, h);
@@ -313,8 +300,6 @@ SiftJob* process_image(const std::string& inputFile, PopSift& popSift)
         {
             exit(EXIT_FAILURE);
         }
-
-        nvtxRangePop(); // "load and convert image - pgmread"
 
         if(!float_mode)
         {
@@ -443,13 +428,12 @@ bool process_image2(const std::string& inputFile,
 
 void read_job(SiftJob* job, bool really_write)
 {
-    popsift::Features* feature_list = job->getHost();
+    popsift::Features* feature_list = job->get();
     std::cerr << "Number of feature points: " << feature_list->getFeatureCount()
               << " number of feature descriptors: " << feature_list->getDescriptorCount() << std::endl;
 
     if(really_write)
     {
-        nvtxRangePushA("Writing features to disk");
         colmap::Timer timer;
         timer.Start();
         std::ofstream of("output-features.txt");
@@ -458,11 +442,6 @@ void read_job(SiftJob* job, bool really_write)
         std::cout << "Writing time: " << timer.ElapsedSeconds() << std::endl;
     }
     delete feature_list;
-
-    if(really_write)
-    {
-        nvtxRangePop(); // Writing features to disk
-    }
 }
 
 struct PopSIFTFeatures
@@ -500,7 +479,7 @@ void read_job2(SiftJob* job, std::vector<PopSIFTFeatures>& features)
 
 int main(int argc, char** argv)
 {
-    cudaDeviceReset();
+    popsift::cuda::reset();
 
     popsift::Config config;
     std::list<std::string> inputFiles;
